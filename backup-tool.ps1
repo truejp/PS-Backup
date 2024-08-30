@@ -7,31 +7,32 @@ $buttonBackColor = "#525753" # Button Background Color
 $buttonTextColor = "#e9f2eb" # Button Text Color
 
 # Autostart Configuration
-
-# Skript-Pfad und -Name ermitteln
+# Bestimme den Pfad zum aktuellen Skript
 $scriptPath = $MyInvocation.MyCommand.Path
 
-# Autostart-Ordner-Pfad ermitteln
-$startupFolder = [System.IO.Path]::Combine($env:APPDATA, 'Microsoft\Windows\Start Menu\Programs\Startup')
+# Bestimme den Pfad zur Batch-Datei im Autostart-Ordner
+$autostartFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
+$batchFilePath = [System.IO.Path]::Combine($autostartFolder, "RunMyScript.bat")
 
-# Autostart-Dateipfad erstellen
-$autostartPath = [System.IO.Path]::Combine($startupFolder, [System.IO.Path]::GetFileName($scriptPath) + '.lnk')
-
-# Prüfen, ob der Autostart-Eintrag bereits existiert
-if (-not (Test-Path $autostartPath)) {
-    # WScript.Shell COM-Objekt erstellen, um die Verknüpfung zu erstellen
-    $wshShell = New-Object -ComObject WScript.Shell
-    $shortcut = $wshShell.CreateShortcut($autostartPath)
-    
-    # Verknüpfung konfigurieren
-    $shortcut.TargetPath = $scriptPath
-    $shortcut.WorkingDirectory = [System.IO.Path]::GetDirectoryName($scriptPath)
-    $shortcut.Save()
-    
-    Write-Output "Autostart-Eintrag wurde erstellt: $autostartPath"
-} else {
-    Write-Output "Autostart-Eintrag existiert bereits: $autostartPath"
+# Funktion zum Überprüfen, ob die Batch-Datei existiert
+function Test-BatchFileExists {
+    return Test-Path $batchFilePath
 }
+
+# Funktion zum Erstellen der Batch-Datei
+function Create-BatchFile {
+    $batchContent = "@echo off`r`npowershell.exe -ExecutionPolicy Bypass -File `"$scriptPath`""
+    Set-Content -Path $batchFilePath -Value $batchContent
+}
+
+# Überprüfen, ob die Batch-Datei existiert und sie erstellen, falls nicht
+if (-not (Test-BatchFileExists)) {
+    Create-BatchFile
+    Write-Host "Batch-Datei erstellt und im Autostart-Ordner platziert."
+} else {
+    Write-Host "Batch-Datei existiert bereits im Autostart-Ordner."
+}
+
 
 
 # Function to save settings
