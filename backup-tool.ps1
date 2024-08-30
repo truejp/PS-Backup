@@ -55,10 +55,11 @@ function Load-Settings {
     } else {
         # Default values if no file exists
         $settings = [pscustomobject]@{
-            BackupPaths     = @()
-            BackupFrequency = "Daily"
-            IsActive        = $false
-            LastBackup      = (Get-Date).ToString("o")  # Initialize with current date
+            BackupPaths           = @()
+            BackupFrequency       = "Daily"
+            IsActive              = $false
+            LastBackup            = (Get-Date).ToString("o")  # Initialize with current date
+            EnableNotifications   = $true  # Default to enabled
         }
     }
 
@@ -70,34 +71,71 @@ function Load-Settings {
     return $settings
 }
 
-# Function to create the backup task
+
 function Start-Backup {
-    $timer = New-Object System.Windows.Forms.Timer
-    $timer.Interval = if ($settings.BackupFrequency -eq 'Hourly') { 3600000 } else { 86400000 }
-    $timer.Add_Tick({
-        Run-Backup
-    })
-    $timer.Start()
-    Log-Event -message "Backup task started with frequency $($settings.BackupFrequency)."
-    Show-Notification -title "Backup Task Started" -message "Backup task started with frequency $($settings.BackupFrequency)."
-    return $timer
+    Log-Event -message "Backup plan started with frequency $($settings.BackupFrequency)."
+    Show-Notification -title "Backup Plan Started" -message "Backup plan started with the $($settings.BackupFrequency) preset."
 }
+
+
+
+# Function to update status
+function Update-Status {
+    if ($settings.IsActive) {
+        try {
+            $lastBackupDate = [datetime]::Parse($settings.LastBackup)
+        } catch {
+            $lastBackupDate = Get-Date
+            $settings.LastBackup = $lastBackupDate.ToString("o")  # If parse fails, use current time
+        }
+
+        $nextBackup = if ($settings.BackupFrequency -eq 'Hourly') {
+            $lastBackupDate.AddHours(1)
+        } else {
+            $lastBackupDate.AddDays(1)
+        }
+
+        $currentTime = Get-Date
+        $timeRemaining = $nextBackup - $currentTime
+
+        # Zeit in Stunden und Minuten umrechnen
+        $hoursRemaining = [math]::Floor($timeRemaining.TotalHours)
+        $minutesRemaining = $timeRemaining.Minutes
+
+        if ($timeRemaining -lt [timespan]::Zero) {
+            # Wenn die Zeit seit dem letzten Backup größer ist als die Frequenz, führe ein Backup durch
+            $statusLabel.Text = "Protection Plan Active"
+            $nextBackupLabel.Text = "Planned: $($nextBackup.ToString('g')) ($hoursRemaining h $minutesRemaining min late)"
+            Run-Backup
+        } else {
+            $statusLabel.Text = "Protection Plan Active"
+            $nextBackupLabel.Text = "Planned: $($nextBackup.ToString('g')) ($hoursRemaining h $minutesRemaining min remaining)"
+        }
+    } else {
+        $statusLabel.Text = "Protection Plan Disabled"
+        $nextBackupLabel.Text = "Your data is not being backed up."
+    }
+}
+
 
 # Function to perform the backup
 function Run-Backup {
     Log-Event -message "Backup started."
     Show-Notification -title "Backup Started" -message "Backup started."
+    $statusLabel.Text = "Running backup... Please wait."
     $settings.BackupPaths | ForEach-Object {
         $source = $_.Source
         $destination = $_.Destination
         Log-Event -message "Starting backup from $source to $destination."
-        Show-Notification -title "Backup in Progress" -message "Starting backup from $source to $destination."
+        Show-Notification -title "Sub-Task in Progress" -message "Starting backup from $source to $destination."
         robocopy $source $destination /MIR /Z /R:5 /W:15
         Log-Event -message "Backup from $source to $destination completed."
-        Show-Notification -title "Backup Completed" -message "Backup from $source to $destination completed."
+        Show-Notification -title "Sub-Task Completed" -message "Backup from $source to $destination completed."
     }
+    Show-Notification -title "Backup Completed" -message "Your data has been successfully backed up."
     $settings.LastBackup = (Get-Date).ToString("o")  # ISO 8601 Format
     Save-Settings -filePath $settingsFile -settings $settings
+    $statusLabel.Text = "Backup completed."
     Update-Status
 }
 
@@ -123,34 +161,13 @@ function Show-Notification {
         [string]$title,
         [string]$message
     )
-    $notifyIcon.BalloonTipTitle = $title
-    $notifyIcon.BalloonTipText = $message
-    $notifyIcon.ShowBalloonTip(3000)  # Time in milliseconds
-}
-
-# Function to update status
-function Update-Status {
-    if ($settings.IsActive) {
-        try {
-            $lastBackupDate = [datetime]::Parse($settings.LastBackup)
-        } catch {
-            $lastBackupDate = Get-Date
-            $settings.LastBackup = $lastBackupDate.ToString("o")  # If parse fails, use current time
-        }
-
-        $nextBackup = if ($settings.BackupFrequency -eq 'Hourly') {
-            $lastBackupDate.AddHours(1)
-        } else {
-            $lastBackupDate.AddDays(1)
-        }
-
-        $statusLabel.Text = "Backup tool is active"
-        $nextBackupLabel.Text = "Next Backup: $($nextBackup.ToString('g'))"  # 'g' for general date/time pattern
-    } else {
-        $statusLabel.Text = "Backup tool is inactive"
-        $nextBackupLabel.Text = "Next Backup: N/A"
+    if ($settings.EnableNotifications) {
+        $notifyIcon.BalloonTipTitle = $title
+        $notifyIcon.BalloonTipText = $message
+        $notifyIcon.ShowBalloonTip(3000)  # Time in milliseconds
     }
 }
+
 
 # Function to open log folder
 function Open-LogFolder {
@@ -174,6 +191,14 @@ function Browse-Folder {
     }
     return $null
 }
+
+# Timer für Status-Aktualisierung
+$statusUpdateTimer = New-Object System.Windows.Forms.Timer
+$statusUpdateTimer.Interval = 60000 # Aktualisiert alle 60 Sekunden
+$statusUpdateTimer.Add_Tick({
+    Update-Status
+})
+$statusUpdateTimer.Start()
 
 # Create GUI
 $form = New-Object System.Windows.Forms.Form
@@ -210,7 +235,7 @@ $versionLabel.Location = New-Object System.Drawing.Point(10,170)
 $versionLabel.Size = New-Object System.Drawing.Size(330,20)
 $versionLabel.Font = New-Object System.Drawing.Font('Arial', 8)
 $versionLabel.TextAlign = 'MiddleLeft'
-$versionLabel.Text = "Version: 1.0 | Author: Philipp Lehnet"
+$versionLabel.Text = "PSB v1.1@2024 | Author: Philipp Lehnet"
 $versionLabel.ForeColor = [System.Drawing.Color]::DarkGray  # Text color
 
 # Load settings
@@ -218,9 +243,8 @@ $settingsFile = "$PSScriptRoot\backup_settings.json"
 $settings = Load-Settings -filePath $settingsFile
 
 # Backup Timer (initially not active)
-$backupTimer = $null
 if ($settings.IsActive) {
-    $backupTimer = Start-Backup
+    Start-Backup
 }
 
 # Update status
@@ -235,7 +259,7 @@ $startButton.BackColor = [System.Drawing.Color]::LightGreen  # Button color
 $startButton.ForeColor = [System.Drawing.Color]::Black # Text color
 $startButton.Add_Click({
     if (-not $settings.IsActive) {
-        $backupTimer = Start-Backup
+        Start-Backup
         $settings.IsActive = $true
         Save-Settings -filePath $settingsFile -settings $settings
         Update-Status
@@ -251,8 +275,6 @@ $stopButton.BackColor = [System.Drawing.Color]::LightCoral  # Button color
 $stopButton.ForeColor = [System.Drawing.Color]::Black # Text color
 $stopButton.Add_Click({
     if ($settings.IsActive) {
-        $backupTimer.Stop()
-        $backupTimer.Dispose()
         $settings.IsActive = $false
         Save-Settings -filePath $settingsFile -settings $settings
         Update-Status
@@ -404,26 +426,26 @@ $settingsButton.Add_Click({
 
     # GroupBox for Backup Frequency
     $frequencyGroupBox = New-Object System.Windows.Forms.GroupBox
-    $frequencyGroupBox.Text = "Backup Frequency"
+    $frequencyGroupBox.Text = "Backup Settings"
     $frequencyGroupBox.Location = New-Object System.Drawing.Point(10,480)
     $frequencyGroupBox.Size = New-Object System.Drawing.Size(520,120)
     $frequencyGroupBox.BackColor = [System.Drawing.ColorTranslator]::FromHtml("$boxBackground")  # Background color
 
     $frequencyLabel = New-Object System.Windows.Forms.Label
-    $frequencyLabel.Text = "Backup Frequency"
+    $frequencyLabel.Text = "Run Backups"
     $frequencyLabel.Location = New-Object System.Drawing.Point(10,20)
     $frequencyLabel.Size = New-Object System.Drawing.Size(120,20)
     $frequencyLabel.ForeColor = [System.Drawing.Color]::DarkBlue  # Text color
 
     $frequencyComboBox = New-Object System.Windows.Forms.ComboBox
-    $frequencyComboBox.Location = New-Object System.Drawing.Point(140,20)
-    $frequencyComboBox.Size = New-Object System.Drawing.Size(120,20)
+    $frequencyComboBox.Location = New-Object System.Drawing.Point(10,40)
+    $frequencyComboBox.Size = New-Object System.Drawing.Size(150,20)
     $frequencyComboBox.Items.AddRange(@("Hourly", "Daily"))
     $frequencyComboBox.SelectedItem = $settings.BackupFrequency
 
     $saveFrequencyButton = New-Object System.Windows.Forms.Button
     $saveFrequencyButton.Text = "Save Frequency"
-    $saveFrequencyButton.Location = New-Object System.Drawing.Point(270,20)
+    $saveFrequencyButton.Location = New-Object System.Drawing.Point(170,35)
     $saveFrequencyButton.Size = New-Object System.Drawing.Size(120,30)
     $saveFrequencyButton.BackColor = [System.Drawing.ColorTranslator]::FromHtml("$buttonBackColor")  # Button color
     $saveFrequencyButton.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("$buttonTextColor")  # Text color
@@ -432,6 +454,24 @@ $settingsButton.Add_Click({
         Save-Settings -filePath $settingsFile -settings $settings
         Update-Status
         Log-Event -message "Backup frequency changed to $($settings.BackupFrequency)."
+    })
+
+    $notificationsCheckBox = New-Object System.Windows.Forms.CheckBox
+    $notificationsCheckBox.Text = "Enable Notifications"
+    $notificationsCheckBox.Location = New-Object System.Drawing.Point(10,80)
+    $notificationsCheckBox.Size = New-Object System.Drawing.Size(150,20)
+    $notificationsCheckBox.Checked = $settings.EnableNotifications
+
+    $saveNotificationsButton = New-Object System.Windows.Forms.Button
+    $saveNotificationsButton.Text = "Save Notifications"
+    $saveNotificationsButton.Location = New-Object System.Drawing.Point(170,75)
+    $saveNotificationsButton.Size = New-Object System.Drawing.Size(120,30)
+    $saveNotificationsButton.BackColor = [System.Drawing.ColorTranslator]::FromHtml("$buttonBackColor")  # Button color
+    $saveNotificationsButton.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("$buttonTextColor")  # Text color
+    $saveNotificationsButton.Add_Click({
+        $settings.EnableNotifications = $notificationsCheckBox.Checked
+        Save-Settings -filePath $settingsFile -settings $settings
+        Log-Event -message "Notification settings changed to $($settings.EnableNotifications)."
     })
 
     # Open Log Folder Button
@@ -444,6 +484,7 @@ $settingsButton.Add_Click({
     $openLogFolderButton.Add_Click({
         Open-LogFolder
     })
+
 
     # Add controls to settings form
     $settingsForm.Controls.Add($backupPathsGroupBox)
@@ -465,6 +506,8 @@ $settingsButton.Add_Click({
     $frequencyGroupBox.Controls.Add($frequencyLabel)
     $frequencyGroupBox.Controls.Add($frequencyComboBox)
     $frequencyGroupBox.Controls.Add($saveFrequencyButton)
+    $frequencyGroupBox.Controls.Add($notificationsCheckBox)
+    $frequencyGroupBox.Controls.Add($saveNotificationsButton)
 
     $settingsForm.Controls.Add($openLogFolderButton)
     
@@ -482,5 +525,5 @@ $form.Controls.Add($versionLabel)
 # Set form background color
 $form.BackColor = [System.Drawing.Color]::White  # Background color
 
-$form.Text = "PS Backup - Philipp Lehnet"  # Title update
+$form.Text = "PSB - PowerShell Backup"  # Title update
 $form.ShowDialog()
