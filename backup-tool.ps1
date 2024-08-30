@@ -12,7 +12,7 @@ $scriptPath = $MyInvocation.MyCommand.Path
 
 # Bestimme den Pfad zur Batch-Datei im Autostart-Ordner
 $autostartFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
-$batchFilePath = [System.IO.Path]::Combine($autostartFolder, "RunMyScript.bat")
+$batchFilePath = [System.IO.Path]::Combine($autostartFolder, "Run_PS_Backup.bat")
 
 # Funktion zum Überprüfen, ob die Batch-Datei existiert
 function Test-BatchFileExists {
