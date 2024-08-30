@@ -370,7 +370,13 @@ $settingsButton.Add_Click({
         $source = $sourceTextBox.Text
         $destination = $destinationTextBox.Text
         if ($source -and $destination) {
-            $settings.BackupPaths = $settings.BackupPaths + [pscustomobject]@{ Source = $source; Destination = $destination }
+            # Ensure BackupPaths is an array
+            if (-not $settings.BackupPaths) {
+                $settings.BackupPaths = @()
+            }
+            # Add new backup path
+            $settings.BackupPaths += [pscustomobject]@{ Source = $source; Destination = $destination }
+            # Save settings to file
             Save-Settings -filePath $settingsFile -settings $settings
             $listBox.Items.Add("Source: $source -> Destination: $destination")
             $sourceTextBox.Clear()
